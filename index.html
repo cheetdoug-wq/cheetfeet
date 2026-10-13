@@ -33,7 +33,7 @@
 <div id="menu"><div id="menuCard"><div style="color:#91cce8;letter-spacing:.24em;font-size:12px;font-weight:800">PHYSICS PLAYGROUND</div><h1>CHEETBOX</h1><p>Grab stuff. Throw stuff. Make a mess.</p><div class="row" style="justify-content:center;margin-top:20px"><button class="primary" id="startBtn" style="font-size:18px;padding:13px 28px">START</button><button id="settingsBtn" style="font-size:16px;padding:13px 22px">SETTINGS</button></div><div id="settingsPanel"><label><input type="checkbox" id="smoothTurn" checked> Smooth thumbstick movement</label><p>Left stick: move · Aim + trigger: grab · Release trigger: drop/throw. Hand tracking is optional and depends on Quest/browser support.</p><button id="backBtn">BACK</button></div></div></div>
 <div id="hud">
   <div id="brand">CHEETBOX <span style="color:#e7f4ff">/ VR</span></div>
-  <div id="sub">Quest physics sandbox • prototype build 02</div>
+  <div id="sub">Quest physics sandbox • Cheetbox field test</div>
   <div class="row">
     <button class="primary" id="vrBtn">Enter VR</button>
     <button id="spawnCube">+ Crate</button>
@@ -41,18 +41,21 @@
     <button id="spawnPlank">+ Plank</button>
     <button id="spawnDummy">+ Dummy</button>
     <button id="spawnRamp">+ Ramp</button>
+    <button id="spawnNPC">+ NPC</button>
+    <button id="mapBtn">Map / Teleport</button>
     <button id="clear" class="danger">Reset lab</button>
   </div>
   <div id="status">Loading 3D scene…</div>
 </div>
 <div id="reticle"></div>
-<div id="help"><b>Desktop:</b> WASD move · mouse look · click an object to grab/throw · click buttons to spawn.<br><b>Quest VR:</b> aim a controller ray and squeeze trigger to grab; release to throw. Point at the floating panel and press trigger to spawn. Use the VR browser menu to recenter if needed.</div>
+<div id="help"><b>Desktop:</b> WASD move · mouse look · Ctrl crouch · click an object to grab/throw.<br><b>Quest VR:</b> left stick move · click left stick to crouch · point + trigger to grab; release to throw. Point at the floating panel and press trigger to spawn. Use the VR browser menu to recenter if needed.</div>
 <div id="error"></div>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"}}
 </script>
 <script type="module">
 import * as THREE from 'three';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 import * as CANNON from 'https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js';
 
 const statusEl = document.querySelector('#status');
@@ -130,6 +133,29 @@ rampMesh.position.set(0,.7,-5); rampMesh.rotation.x=-.23; rampMesh.castShadow=tr
 const rampBody = new CANNON.Body({mass:0,material:matObject,shape:new CANNON.Box(new CANNON.Vec3(2,.11,1.5)),position:new CANNON.Vec3(0,.7,-5)});
 rampBody.quaternion.setFromEuler(-.23,0,0); world.addBody(rampBody);
 
+// Field-test map: distinct workshop, courtyard, obstacle course, and NPC hangout.
+function decoBox(pos,size,color,rough=.8,metal=.05){const m=new THREE.Mesh(new THREE.BoxGeometry(...size),new THREE.MeshStandardMaterial({color,roughness:rough,metalness:metal}));m.position.set(...pos);m.castShadow=true;m.receiveShadow=true;scene.add(m);return m;}
+function cylinder(pos,r,h,color){const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,20),new THREE.MeshStandardMaterial({color,roughness:.65}));m.position.set(...pos);m.castShadow=true;scene.add(m);return m;}
+// Painted zone markings and large signs
+for(const [x,z,w,d,c] of [[-7,-5,7,7,0x284b5c],[7,-5,7,7,0x514332],[0,7,10,6,0x2c4b3d]]){
+ const pad=decoBox([x,.012,z],[w,.018,d],c,.95); pad.material.transparent=true;pad.material.opacity=.48;
+}
+// Workshop structure and shelves
+for(const [x,z] of [[-9,-9],[-5,-9],[-9,-5],[-5,-5]])decoBox([x,1.8,z],[.18,3.6,.18],0x687d89,.5,.35);
+for(let y of [1,2.2,3.2]){decoBox([-7,y,-9],[4,.12,.5],0x9a754d);}
+for(let i=0;i<5;i++){const b=decoBox([-8.4+(i%2)*1.5,.55+Math.floor(i/2)*.55,-8.7],[.48,.48,.42],[0x9d6d42,0x287ca2,0xb34b43][i%3]);}
+// Yard: tires, barrels, cones, low walls, stairs
+for(let i=0;i<5;i++){const tire=new THREE.Mesh(new THREE.TorusGeometry(.43,.14,10,24),new THREE.MeshStandardMaterial({color:0x24292e,roughness:.95}));tire.rotation.x=Math.PI/2;tire.position.set(5+i*.95,.44,-8.4);scene.add(tire);}
+for(let i=0;i<4;i++){cylinder([6.5,.6,-2.5+i*1.25],.32,1.2,[0x2b8a91,0xb94a3e,0xd4a33e,0x4c6f9a][i]);}
+for(let i=0;i<5;i++)decoBox([4,.18,2+i*1.1],[1.5,.36,.8],0x7e8a8f);
+// Parkour steps and a tunnel frame
+for(let i=0;i<5;i++)decoBox([-4+i*1.15,.2+i*.24,4],[.95,.4+i*.48,1.0],i%2?0x287ca2:0xd5a43a);
+for(const x of [-2.5,2.5])decoBox([x,1.35,8],[.18,2.7,.18],0x657e8b);
+decoBox([0,2.65,8],[5.2,.18,.18],0x657e8b);
+// Glowing route lights
+for(let i=0;i<9;i++){const l=new THREE.Mesh(new THREE.SphereGeometry(.075,10,8),new THREE.MeshBasicMaterial({color:i%2?0x4fe2ff:0xffc05c}));l.position.set(-10+i*2.5,.12,10);scene.add(l);}
+
+
 const objects = [];
 const spawnables = new Set();
 let nextId=1;
@@ -153,6 +179,7 @@ function spawn(kind) {
   if(kind==='plank') addDynamic(kind,[at.x,at.y,at.z],[1.35,.16,.38],mats.blue,2.0);
   if(kind==='ramp') addDynamic(kind,[at.x,at.y,at.z],[1.5,.16,1.2],mats.yellow,4);
   if(kind==='dummy') spawnDummy([at.x,at.y,at.z]);
+  if(kind==='npc') spawnNPC([at.x,0,at.z]);
   say('Spawned '+kind+'. Grab it, throw it, or stack it.');
 }
 function spawnDummy(pos) {
@@ -174,6 +201,20 @@ function spawnDummy(pos) {
   link(torso,legL,[-.1,-.26,0],[0,.22,0]); link(torso,legR,[.1,-.26,0],[0,.22,0]);
   return parts;
 }
+// Simple NPCs with visible stylized bodies and wandering/looking behavior.
+const npcs=[];
+function spawnNPC(pos=[-5,0,5]){
+ const root=new THREE.Group();root.position.set(pos[0],0,pos[2]);scene.add(root);
+ const skin=new THREE.MeshStandardMaterial({color:0xd8ad86,roughness:.75}), shirt=new THREE.MeshStandardMaterial({color:0x4aa4bd,roughness:.7}), pants=new THREE.MeshStandardMaterial({color:0x303d55,roughness:.85}), dark=new THREE.MeshStandardMaterial({color:0x20252b,roughness:.7});
+ function piece(g,m,p){const o=new THREE.Mesh(g,m);o.position.set(...p);o.castShadow=true;root.add(o);return o;}
+ piece(new THREE.CapsuleGeometry(.22,.42,5,10),shirt,[0,1.05,0]);piece(new THREE.SphereGeometry(.17,16,12),skin,[0,1.55,0]);
+ const eyes=piece(new THREE.BoxGeometry(.11,.035,.025),dark,[0,1.57,-.15]);
+ for(const side of [-1,1]){const arm=piece(new THREE.CapsuleGeometry(.075,.42,4,8),shirt,[side*.3,1.12,0]);arm.rotation.z=side*.22;piece(new THREE.CapsuleGeometry(.09,.36,4,8),pants,[side*.12,.47,0]);piece(new THREE.BoxGeometry(.14,.09,.25),dark,[side*.12,.12,-.04]);}
+ const badge=piece(new THREE.BoxGeometry(.12,.12,.025),new THREE.MeshStandardMaterial({color:0xffd166,emissive:0x332000}),[.08,1.17,-.21]);
+ const npc={root,home:root.position.clone(),target:new THREE.Vector3(pos[0]+Math.random()*5-2.5,0,pos[2]+Math.random()*5-2.5),timer:1,skin,shirt,pants};npcs.push(npc);return npc;
+}
+spawnNPC([-5,0,5]);spawnNPC([5,0,5]);spawnNPC([0,0,9]);
+
 // Starter objects
 addDynamic('crate',[-2,1.6,-1],[.6,.6,.6],mats.crate,2.4);
 addDynamic('ball',[-1,2.1,-1],[.3],mats.red,1.1,'sphere');
@@ -209,6 +250,8 @@ document.querySelector('#spawnBall').onclick=()=>spawn('ball');
 document.querySelector('#spawnPlank').onclick=()=>spawn('plank');
 document.querySelector('#spawnDummy').onclick=()=>spawn('dummy');
 document.querySelector('#spawnRamp').onclick=()=>spawn('ramp');
+document.querySelector('#spawnNPC').onclick=()=>spawn('npc');
+document.querySelector('#mapBtn').onclick=()=>{if(renderer.xr.isPresenting){playerRig.position.set(0,0,5);say('Returned to the central field-test spawn.');}else{camera.position.set(0,1.65,5.8);say('Map reset: central spawn. Explore the workshop, yard, and obstacle course.');}};
 document.querySelector('#clear').onclick=()=>{
   for(const o of [...objects]) { world.removeBody(o.body);scene.remove(o.mesh); }
   objects.length=0;spawnables.clear();
@@ -223,6 +266,22 @@ document.querySelector('#clear').onclick=()=>{
 const raycaster=new THREE.Raycaster();
 const tempMatrix=new THREE.Matrix4();
 const controllerData=[];
+// Real tracked-hand visualization: 25 joint spheres and connecting bones when the Quest exposes XRHand.
+const handFactory = new XRHandModelFactory();
+for(let i=0;i<2;i++){
+  const trackedHand = renderer.xr.getHand(i);
+  const trackedModel = handFactory.createHand(trackedHand, 'spheres');
+  trackedHand.add(trackedModel);
+  playerRig.add(trackedHand);
+  trackedHand.addEventListener('selectstart',()=>{
+    // WebXR hand pinch is surfaced as selectstart in browsers that support hand input.
+    const data=controllerData[i]; if(data && !data.held) onSelectStart(data);
+  });
+  trackedHand.addEventListener('selectend',()=>{const data=controllerData[i];if(data?.held)onSelectEnd(data);});
+}
+
+const handVisuals=[];
+const jointNames=['wrist','thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip','index-finger-metacarpal','index-finger-phalanx-proximal','index-finger-phalanx-intermediate','index-finger-phalanx-distal','index-finger-tip','middle-finger-metacarpal','middle-finger-phalanx-proximal','middle-finger-phalanx-intermediate','middle-finger-phalanx-distal','middle-finger-tip','ring-finger-metacarpal','ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate','ring-finger-phalanx-distal','ring-finger-tip','pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip'];
 function makeRayLine() {
   const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-1)]);
   const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:0x8ce5ff,transparent:true,opacity:.85}));
@@ -316,6 +375,7 @@ function animate(){
     const speed=keys.shift?5:2.8;
     if(keys.w)camera.position.addScaledVector(dir,speed*dt);
     if(keys.s)camera.position.addScaledVector(dir,-speed*dt);
+    camera.position.y += (((keys.control||keys.c)?1.05:1.65)-camera.position.y)*Math.min(1,dt*12);
     if(keys.a)camera.position.addScaledVector(right,-speed*dt);
     if(keys.d)camera.position.addScaledVector(right,speed*dt);
   }
@@ -324,7 +384,8 @@ function animate(){
     const left=controllerData.find(d=>d.controller.userData.inputSource?.handedness==='left');
     const gp=left?.controller.userData.inputSource?.gamepad;
     if(gp){
-      const axes=gp.axes; let ax=0,ay=0;
+      const axes=gp.axes;
+      if(gp.buttons?.[3]?.pressed || gp.buttons?.[2]?.pressed) playerRig.position.y=-.48; else playerRig.position.y += (0-playerRig.position.y)*Math.min(1,dt*8); let ax=0,ay=0;
       if(axes.length>=4){ax=axes[2]||0;ay=axes[3]||0;}
       if(Math.abs(ax)+Math.abs(ay)<.08 && axes.length>=2){ax=axes[0]||0;ay=axes[1]||0;}
       const dead=.16; if(Math.abs(ax)<dead)ax=0;if(Math.abs(ay)<dead)ay=0;
@@ -345,6 +406,7 @@ function animate(){
       d.lastHandPos = p.clone(); d.lastHandTime=performance.now();
     }
   }
+  for(const n of npcs){n.timer-=dt;const dx=n.target.x-n.root.position.x,dz=n.target.z-n.root.position.z,dist=Math.hypot(dx,dz);if(n.timer<=0||dist<.35){n.target.set(n.home.x+(Math.random()-.5)*7,0,n.home.z+(Math.random()-.5)*5);n.timer=3+Math.random()*4;}else if(dist>.05){n.root.position.x+=dx/dist*.48*dt;n.root.position.z+=dz/dist*.48*dt;n.root.rotation.y=Math.atan2(-dx,-dz);}}
   world.step(1/60,dt,4);
   for(const o of objects){
     o.mesh.position.set(o.body.position.x,o.body.position.y,o.body.position.z);
@@ -368,7 +430,7 @@ window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camer
 document.querySelector('#startBtn').onclick=()=>{document.querySelector('#menu').style.display='none';say('Welcome to Cheetbox. Use the left stick to move; aim + trigger to grab.');};
 document.querySelector('#settingsBtn').onclick=()=>{const p=document.querySelector('#settingsPanel');p.style.display=p.style.display==='block'?'none':'block';};
 document.querySelector('#backBtn').onclick=()=>{document.querySelector('#settingsPanel').style.display='none';};
-say('Cheetbox ready. Press START to enter the sandbox.');
+say('Cheetbox field test ready. Start, explore the zones, crouch, meet NPCs, and spawn props.');
 </script>
 </body>
 </html>

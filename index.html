@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Cheetbox</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#090d12; font-family:Inter,system-ui,Arial,sans-serif; color:#eef4fb; }
+  canvas { display:block; }
+  #hud { position:fixed; z-index:5; left:14px; top:14px; max-width:min(440px,calc(100vw - 28px)); background:rgba(8,13,20,.84); border:1px solid rgba(173,204,230,.2); border-radius:16px; padding:13px 14px; backdrop-filter:blur(12px); box-shadow:0 10px 35px #0006; }
+  #brand { font-size:14px; letter-spacing:.16em; font-weight:800; color:#92d7ff; text-transform:uppercase; }
+  #sub { color:#a8b8c9; font-size:12px; margin:4px 0 10px; }
+  .row { display:flex; flex-wrap:wrap; gap:7px; }
+  button { border:1px solid #496277; color:#edf7ff; background:linear-gradient(#263c4d,#172532); border-radius:10px; padding:9px 11px; font-weight:700; cursor:pointer; }
+  button:hover { border-color:#86d6ff; background:#2b4b60; }
+  button.primary { background:linear-gradient(#1686b4,#09628a); border-color:#57c9ff; }
+  button.danger { background:linear-gradient(#6e3336,#421d24); border-color:#a85b62; }
+  #status { font-size:12px; color:#c5d6e4; margin-top:10px; line-height:1.4; }
+  #help { position:fixed; right:14px; bottom:14px; z-index:5; max-width:320px; font-size:12px; line-height:1.45; color:#c3d0dc; background:#080d13d9; border:1px solid #9bbbd51f; border-radius:13px; padding:11px 13px; }
+  #reticle { position:fixed; top:50%; left:50%; width:9px; height:9px; margin:-4px; border:1px solid #d9f4ff; border-radius:50%; pointer-events:none; z-index:4; box-shadow:0 0 9px #69d8ff; }
+  #menu { position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center; background:radial-gradient(ellipse at 50% 35%,#193449ee,#05090ff7 70%); }
+  #menuCard { width:min(520px,calc(100vw - 32px)); padding:30px; border:1px solid #4c7894; border-radius:24px; background:#0b1520ed; box-shadow:0 24px 90px #000a; text-align:center; }
+  #menu h1 { margin:0; font-size:clamp(42px,9vw,72px); letter-spacing:.08em; color:#86ddff; }
+  #menu p { color:#b8cddd; line-height:1.5; }
+  #settingsPanel { display:none; margin-top:16px; text-align:left; color:#d7e8f3; }
+  #error { display:none; position:fixed; inset:auto 12px 12px; z-index:9; background:#491d25; border:1px solid #c56b79; border-radius:12px; padding:12px; color:white; white-space:pre-wrap; }
+  @media(max-width:600px) { #help { left:14px; right:14px; max-width:none; bottom:12px; } #hud { max-width:calc(100vw - 28px); } }
+</style>
+</head>
+<body>
+<div id="menu"><div id="menuCard"><div style="color:#91cce8;letter-spacing:.24em;font-size:12px;font-weight:800">PHYSICS PLAYGROUND</div><h1>CHEETBOX</h1><p>Grab stuff. Throw stuff. Make a mess.</p><div class="row" style="justify-content:center;margin-top:20px"><button class="primary" id="startBtn" style="font-size:18px;padding:13px 28px">START</button><button id="settingsBtn" style="font-size:16px;padding:13px 22px">SETTINGS</button></div><div id="settingsPanel"><label><input type="checkbox" id="smoothTurn" checked> Smooth thumbstick movement</label><p>Left stick: move · Aim + trigger: grab · Release trigger: drop/throw. Hand tracking is optional and depends on Quest/browser support.</p><button id="backBtn">BACK</button></div></div></div>
+<div id="hud">
+  <div id="brand">CHEETBOX <span style="color:#e7f4ff">/ VR</span></div>
+  <div id="sub">Quest physics sandbox • prototype build 02</div>
+  <div class="row">
+    <button class="primary" id="vrBtn">Enter VR</button>
+    <button id="spawnCube">+ Crate</button>
+    <button id="spawnBall">+ Ball</button>
+    <button id="spawnPlank">+ Plank</button>
+    <button id="spawnDummy">+ Dummy</button>
+    <button id="spawnRamp">+ Ramp</button>
+    <button id="clear" class="danger">Reset lab</button>
+  </div>
+  <div id="status">Loading 3D scene…</div>
+</div>
+<div id="reticle"></div>
+<div id="help"><b>Desktop:</b> WASD move · mouse look · click an object to grab/throw · click buttons to spawn.<br><b>Quest VR:</b> aim a controller ray and squeeze trigger to grab; release to throw. Point at the floating panel and press trigger to spawn. Use the VR browser menu to recenter if needed.</div>
+<div id="error"></div>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import * as CANNON from 'https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js';
+
+const statusEl = document.querySelector('#status');
+const errorEl = document.querySelector('#error');
+const say = s => statusEl.textContent = s;
+window.addEventListener('error', e => { errorEl.style.display='block'; errorEl.textContent='Runtime error: '+e.message; });
+window.addEventListener('unhandledrejection', e => { errorEl.style.display='block'; errorEl.textContent='Loading error: '+(e.reason?.message || e.reason); });
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x91a7b7);
+scene.fog = new THREE.Fog(0x91a7b7, 20, 70);
+const camera = new THREE.PerspectiveCamera(72, innerWidth/innerHeight, 0.05, 140);
+const playerRig = new THREE.Group(); scene.add(playerRig); playerRig.add(camera);
+camera.position.set(0, 1.65, 5.8);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+const hemi = new THREE.HemisphereLight(0xdceeff, 0x5b5e61, 2.0); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff0dc, 3.2);
+sun.position.set(-7, 12, 5); sun.castShadow=true; sun.shadow.mapSize.set(1024,1024);
+sun.shadow.camera.left=-15; sun.shadow.camera.right=15; sun.shadow.camera.top=15; sun.shadow.camera.bottom=-15; scene.add(sun);
+
+const world = new CANNON.World({gravity:new CANNON.Vec3(0,-9.82,0)});
+world.broadphase = new CANNON.SAPBroadphase(world);
+world.allowSleep = true;
+world.defaultContactMaterial.friction = 0.55;
+world.defaultContactMaterial.restitution = 0.12;
+const matGround = new CANNON.Material('ground'), matObject = new CANNON.Material('object');
+world.addContactMaterial(new CANNON.ContactMaterial(matGround,matObject,{friction:.7,restitution:.08}));
+
+const mats = {
+  floor: new THREE.MeshStandardMaterial({color:0x53616b, roughness:.94, metalness:.08}),
+  wall: new THREE.MeshStandardMaterial({color:0x283640, roughness:.85}),
+  trim: new THREE.MeshStandardMaterial({color:0x6f8794, metalness:.5, roughness:.45}),
+  crate: new THREE.MeshStandardMaterial({color:0x96704c, roughness:.78}),
+  blue: new THREE.MeshStandardMaterial({color:0x197da5, roughness:.35, metalness:.25}),
+  red: new THREE.MeshStandardMaterial({color:0xb7443f, roughness:.4, metalness:.1}),
+  yellow: new THREE.MeshStandardMaterial({color:0xd5a43a, roughness:.45, metalness:.15}),
+  rubber: new THREE.MeshStandardMaterial({color:0x22272b, roughness:.9}),
+  dummy: new THREE.MeshStandardMaterial({color:0xd4b18a, roughness:.72}),
+  white: new THREE.MeshStandardMaterial({color:0xe4edf1, roughness:.38, metalness:.15})
+};
+
+function staticBox(name, pos, size, material, opts={}) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+  mesh.position.set(...pos); mesh.receiveShadow=true; mesh.castShadow=true; scene.add(mesh);
+  const body = new CANNON.Body({mass:0, material:opts.ground?matGround:matObject, shape:new CANNON.Box(new CANNON.Vec3(size[0]/2,size[1]/2,size[2]/2)), position:new CANNON.Vec3(...pos)});
+  world.addBody(body); return mesh;
+}
+staticBox('floor',[0,-.18,0],[28,.36,28],mats.floor,{ground:true});
+for(let i=-14;i<=14;i+=1) {
+  const grid1 = new THREE.Mesh(new THREE.BoxGeometry(.018,.004,28),new THREE.MeshBasicMaterial({color:0x91a5b0,transparent:true,opacity:.22}));
+  grid1.position.set(i,.006,0); scene.add(grid1);
+  const grid2 = new THREE.Mesh(new THREE.BoxGeometry(28,.004,.018),new THREE.MeshBasicMaterial({color:0x91a5b0,transparent:true,opacity:.22}));
+  grid2.position.set(0,.007,i); scene.add(grid2);
+}
+staticBox('back wall',[0,2,-13.8],[28,4,.25],mats.wall);
+staticBox('left wall',[-13.8,2,0],[.25,4,28],mats.wall);
+staticBox('right wall',[13.8,2,0],[.25,4,28],mats.wall);
+staticBox('test table',[-3,.65,-2],[3,.3,2],mats.trim);
+staticBox('raised platform',[4,.25,-3],[4,.5,4],mats.trim);
+staticBox('slope base',[0,.05,-5],[4,.15,3],mats.trim);
+const rampMesh = new THREE.Mesh(new THREE.BoxGeometry(4,.22,3),mats.trim);
+rampMesh.position.set(0,.7,-5); rampMesh.rotation.x=-.23; rampMesh.castShadow=true; rampMesh.receiveShadow=true; scene.add(rampMesh);
+// collision approximation for the ramp as a static rotated box
+const rampBody = new CANNON.Body({mass:0,material:matObject,shape:new CANNON.Box(new CANNON.Vec3(2,.11,1.5)),position:new CANNON.Vec3(0,.7,-5)});
+rampBody.quaternion.setFromEuler(-.23,0,0); world.addBody(rampBody);
+
+const objects = [];
+const spawnables = new Set();
+let nextId=1;
+function addDynamic(kind, pos, size, material, mass=1, shapeType='box') {
+  let geo, shape;
+  if(shapeType==='sphere') { geo=new THREE.SphereGeometry(size[0],20,14); shape=new CANNON.Sphere(size[0]); }
+  else if(shapeType==='cylinder') { geo=new THREE.CylinderGeometry(size[0],size[0],size[1],18); shape=new CANNON.Cylinder(size[0],size[0],size[1],18); }
+  else { geo=new THREE.BoxGeometry(...size); shape=new CANNON.Box(new CANNON.Vec3(size[0]/2,size[1]/2,size[2]/2)); }
+  const mesh = new THREE.Mesh(geo,material); mesh.position.set(...pos); mesh.castShadow=true; mesh.receiveShadow=true; scene.add(mesh);
+  const body = new CANNON.Body({mass,material:matObject,shape,position:new CANNON.Vec3(...pos),linearDamping:.12,angularDamping:.18});
+  body.allowSleep=true; world.addBody(body);
+  const item={id:nextId++,kind,mesh,body,heldBy:null}; objects.push(item); spawnables.add(mesh);
+  return item;
+}
+function spawn(kind) {
+  const p = camera.getWorldDirection(new THREE.Vector3());
+  const origin = new THREE.Vector3(); camera.getWorldPosition(origin);
+  const at = origin.add(p.multiplyScalar(2.2)); at.y=Math.max(1.2,at.y);
+  if(kind==='crate') addDynamic(kind,[at.x,at.y,at.z],[.55,.55,.55],mats.crate,2.3);
+  if(kind==='ball') addDynamic(kind,[at.x,at.y,at.z],[.27],mats.red,1.1,'sphere');
+  if(kind==='plank') addDynamic(kind,[at.x,at.y,at.z],[1.35,.16,.38],mats.blue,2.0);
+  if(kind==='ramp') addDynamic(kind,[at.x,at.y,at.z],[1.5,.16,1.2],mats.yellow,4);
+  if(kind==='dummy') spawnDummy([at.x,at.y,at.z]);
+  say('Spawned '+kind+'. Grab it, throw it, or stack it.');
+}
+function spawnDummy(pos) {
+  // Lightweight articulated ragdoll made of linked rigid-body pieces.
+  const parts=[];
+  const part=(name,offset,size,material,mass,shape='box')=>{
+    const p=[pos[0]+offset[0],pos[1]+offset[1],pos[2]+offset[2]];
+    const o=addDynamic('dummy-'+name,p,size,material,mass,shape); parts.push(o); return o;
+  };
+  const torso=part('torso',[0,0,0],[.34,.52,.2],mats.blue,2);
+  const head=part('head',[0,.42,0],[.18],mats.dummy,.7,'sphere');
+  const armL=part('arm',[ -.29,.06,0],[.13,.4,.13],mats.dummy,.55);
+  const armR=part('arm',[ .29,.06,0],[.13,.4,.13],mats.dummy,.55);
+  const legL=part('leg',[-.12,-.48,0],[.15,.44,.16],mats.rubber,.85);
+  const legR=part('leg',[ .12,-.48,0],[.15,.44,.16],mats.rubber,.85);
+  const link=(a,b,pa,pb)=>{const c=new CANNON.PointToPointConstraint(a.body,new CANNON.Vec3(...pa),b.body,new CANNON.Vec3(...pb),2e4);world.addConstraint(c);};
+  link(torso,head,[0,.26,0],[0,-.18,0]);
+  link(torso,armL,[-.17,.14,0],[0,.18,0]); link(torso,armR,[.17,.14,0],[0,.18,0]);
+  link(torso,legL,[-.1,-.26,0],[0,.22,0]); link(torso,legR,[.1,-.26,0],[0,.22,0]);
+  return parts;
+}
+// Starter objects
+addDynamic('crate',[-2,1.6,-1],[.6,.6,.6],mats.crate,2.4);
+addDynamic('ball',[-1,2.1,-1],[.3],mats.red,1.1,'sphere');
+addDynamic('plank',[1,1.4,-1],[1.25,.15,.42],mats.blue,2);
+spawnDummy([2,1.8,-1]);
+
+// Floating spawn panel in the world for VR controllers.
+const panel = new THREE.Group(); panel.position.set(-1.9,1.65,-2.0); panel.rotation.y=.15; scene.add(panel);
+const panelBg = new THREE.Mesh(new THREE.BoxGeometry(1.65,1.45,.07),new THREE.MeshStandardMaterial({color:0x101b24,roughness:.7,metalness:.15}));
+panel.add(panelBg);
+function makeText(text, size=48, color='#eaf7ff') {
+  const c=document.createElement('canvas'); c.width=512;c.height=128;
+  const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);ctx.font=`700 ${size}px Arial`;ctx.fillStyle=color;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,256,64,500);
+  const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
+  const m=new THREE.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false});
+  return new THREE.Mesh(new THREE.PlaneGeometry(1.25,.31),m);
+}
+const title=makeText('CHEETBOX',40,'#83dfff');title.position.set(0,.56,.045);panel.add(title);
+const vrButtons=[];
+function panelButton(label, kind, x,y,color) {
+  const g=new THREE.Group();g.position.set(x,y,.065);panel.add(g);
+  const b=new THREE.Mesh(new THREE.BoxGeometry(.67,.31,.045),new THREE.MeshStandardMaterial({color,roughness:.45,metalness:.1}));g.add(b);
+  const t=makeText(label,38);t.scale.set(.52,.13,1);t.position.z=.028;g.add(t);
+  vrButtons.push({mesh:b,kind,group:g}); return g;
+}
+panelButton('CRATE','crate',-.39,.23,0x8e6845);panelButton('BALL','ball',.39,.23,0xb7443f);
+panelButton('PLANK','plank',-.39,-.13,0x197da5);panelButton('DUMMY','dummy',.39,-.13,0x94795f);
+panelButton('RAMP','ramp',-.39,-.49,0xd5a43a);
+const panelHint=makeText('AIM + TRIGGER',25,'#b9d6e5');panelHint.scale.set(.85,.13,1);panelHint.position.set(0,-.68,.05);panel.add(panelHint);
+
+document.querySelector('#spawnCube').onclick=()=>spawn('crate');
+document.querySelector('#spawnBall').onclick=()=>spawn('ball');
+document.querySelector('#spawnPlank').onclick=()=>spawn('plank');
+document.querySelector('#spawnDummy').onclick=()=>spawn('dummy');
+document.querySelector('#spawnRamp').onclick=()=>spawn('ramp');
+document.querySelector('#clear').onclick=()=>{
+  for(const o of [...objects]) { world.removeBody(o.body);scene.remove(o.mesh); }
+  objects.length=0;spawnables.clear();
+  // Rebuild a few props
+  addDynamic('crate',[-2,1.6,-1],[.6,.6,.6],mats.crate,2.4);
+  addDynamic('ball',[-1,2.1,-1],[.3],mats.red,1.1,'sphere');
+  addDynamic('plank',[1,1.4,-1],[1.25,.15,.42],mats.blue,2);
+  spawnDummy([2,1.8,-1]); say('Lab reset.');
+};
+
+// XR controllers and grabbing
+const raycaster=new THREE.Raycaster();
+const tempMatrix=new THREE.Matrix4();
+const controllerData=[];
+function makeRayLine() {
+  const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-1)]);
+  const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:0x8ce5ff,transparent:true,opacity:.85}));
+  line.scale.z=8;return line;
+}
+for(let i=0;i<2;i++){
+  const c=renderer.xr.getController(i);playerRig.add(c);c.add(makeRayLine());
+  const grip=renderer.xr.getControllerGrip(i);
+  const hand=new THREE.Mesh(new THREE.SphereGeometry(.075,12,10),new THREE.MeshStandardMaterial({color:i?0x4fb4ed:0xffbd69,metalness:.15,roughness:.4}));
+  grip.add(hand);
+  // A readable hand-shaped controller proxy: palm plus four fingers and thumb.
+  hand.scale.set(1.05,.72,1.25); hand.position.set(0,-.015,-.015);
+  const fingerMat=new THREE.MeshStandardMaterial({color:i?0x4fb4ed:0xffbd69,roughness:.55});
+  for(let f=0;f<4;f++){const finger=new THREE.Mesh(new THREE.CapsuleGeometry(.014,.065,3,6),fingerMat);finger.position.set((f-1.5)*.026,-.018,-.095-Math.abs(f-1.5)*.004);finger.rotation.x=-.22;grip.add(finger);}
+  const thumb=new THREE.Mesh(new THREE.CapsuleGeometry(.016,.055,3,6),fingerMat);thumb.position.set(i?-.065:.065,-.005,-.025);thumb.rotation.z=i?-.7:.7;grip.add(thumb);
+  playerRig.add(grip);
+  const data={controller:c,grip,held:null,anchor:null,constraint:null,selecting:false,raycaster:new THREE.Raycaster()};
+  c.userData.data=data;
+  c.addEventListener('connected',e=>{c.userData.inputSource=e.data;});
+  c.addEventListener('disconnected',()=>{c.userData.inputSource=null; if(data.held)onSelectEnd(data);});
+  c.addEventListener('selectstart',()=>onSelectStart(data));
+  c.addEventListener('selectend',()=>onSelectEnd(data));
+  controllerData.push(data);
+}
+function controllerHit(data) {
+  tempMatrix.identity().extractRotation(data.controller.matrixWorld);
+  data.raycaster.ray.origin.setFromMatrixPosition(data.controller.matrixWorld);
+  data.raycaster.ray.direction.set(0,0,-1).applyMatrix4(tempMatrix);
+  const targets=[...spawnables,...vrButtons.map(b=>b.mesh)];
+  const hits=data.raycaster.intersectObjects(targets,false);
+  return hits[0]||null;
+}
+function onSelectStart(data) {
+  const hit=controllerHit(data);
+  if(!hit)return;
+  const button=vrButtons.find(b=>b.mesh===hit.object);
+  if(button){spawn(button.kind);return;}
+  const item=objects.find(o=>o.mesh===hit.object);
+  if(!item || item.heldBy)return;
+  data.held=item; item.heldBy=data;
+  item.body.type=CANNON.Body.KINEMATIC; item.body.updateMassProperties();
+  item.body.velocity.set(0,0,0); item.body.angularVelocity.set(0,0,0);
+  data.lastHandPos=new THREE.Vector3(); data.grip.getWorldPosition(data.lastHandPos);
+  data.lastHandTime=performance.now();
+}
+function onSelectEnd(data) {
+  if(data.held){
+    const item=data.held; item.body.type=CANNON.Body.DYNAMIC; item.body.updateMassProperties();
+    const now=performance.now(), elapsed=Math.max(.012,(now-(data.lastHandTime||now))/1000);
+    const p=new THREE.Vector3(); data.grip.getWorldPosition(p);
+    const v=data.lastHandPos ? p.sub(data.lastHandPos).multiplyScalar(1/elapsed) : new THREE.Vector3();
+    v.clampLength(0,5.5); item.body.velocity.set(v.x,v.y,v.z);
+    item.body.angularVelocity.set(0,0,0); item.body.wakeUp(); item.heldBy=null;
+  }
+  data.held=null; data.lastHandPos=null; data.lastHandTime=0;
+}
+
+// Desktop mouse-look and movement; in VR headset tracking takes over.
+let yaw=0,pitch=0,mouseDown=false,prevX=0,prevY=0;
+const keys={};
+window.addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;});
+window.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+renderer.domElement.addEventListener('click',()=>{
+  if(renderer.xr.isPresenting)return;
+  renderer.domElement.requestPointerLock?.();
+});
+document.addEventListener('pointerlockchange',()=>{mouseDown=document.pointerLockElement===renderer.domElement;});
+document.addEventListener('mousemove',e=>{
+  if(!mouseDown||renderer.xr.isPresenting)return;
+  yaw-=e.movementX*.0022;pitch-=e.movementY*.0022;pitch=Math.max(-1.45,Math.min(1.45,pitch));
+  camera.rotation.order='YXZ';camera.rotation.set(pitch,yaw,0);
+});
+const mouseRay=new THREE.Raycaster();
+let desktopHeld=null;
+window.addEventListener('mousedown',e=>{
+  if(renderer.xr.isPresenting||e.target.tagName==='BUTTON')return;
+  mouseRay.setFromCamera(new THREE.Vector2(0,0),camera);
+  const hit=mouseRay.intersectObjects([...spawnables],false)[0];
+  if(hit){desktopHeld=objects.find(o=>o.mesh===hit.object);if(desktopHeld){desktopHeld.body.type=CANNON.Body.KINEMATIC;desktopHeld.body.updateMassProperties();}}
+});
+window.addEventListener('mouseup',()=>{
+  if(desktopHeld){desktopHeld.body.type=CANNON.Body.DYNAMIC;desktopHeld.body.updateMassProperties();const d=new THREE.Vector3();camera.getWorldDirection(d);desktopHeld.body.velocity.set(d.x*4,d.y*4,d.z*4);desktopHeld=null;}
+});
+
+const clock=new THREE.Clock();
+function animate(){
+  const dt=Math.min(clock.getDelta(),.033);
+  if(!renderer.xr.isPresenting){
+    const dir=new THREE.Vector3();camera.getWorldDirection(dir);dir.y=0;dir.normalize();
+    const right=new THREE.Vector3().crossVectors(dir,new THREE.Vector3(0,1,0)).normalize().multiplyScalar(-1);
+    const speed=keys.shift?5:2.8;
+    if(keys.w)camera.position.addScaledVector(dir,speed*dt);
+    if(keys.s)camera.position.addScaledVector(dir,-speed*dt);
+    if(keys.a)camera.position.addScaledVector(right,-speed*dt);
+    if(keys.d)camera.position.addScaledVector(right,speed*dt);
+  }
+  // Thumbstick locomotion on Quest. XR axis layouts vary, so choose the strongest usable pair.
+  if(renderer.xr.isPresenting){
+    const left=controllerData.find(d=>d.controller.userData.inputSource?.handedness==='left');
+    const gp=left?.controller.userData.inputSource?.gamepad;
+    if(gp){
+      const axes=gp.axes; let ax=0,ay=0;
+      if(axes.length>=4){ax=axes[2]||0;ay=axes[3]||0;}
+      if(Math.abs(ax)+Math.abs(ay)<.08 && axes.length>=2){ax=axes[0]||0;ay=axes[1]||0;}
+      const dead=.16; if(Math.abs(ax)<dead)ax=0;if(Math.abs(ay)<dead)ay=0;
+      if(document.querySelector('#smoothTurn').checked && (ax||ay)){
+        const forward=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);forward.y=0;forward.normalize();
+        const right=new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);right.y=0;right.normalize();
+        playerRig.position.addScaledVector(right,ax*2.1*dt); playerRig.position.addScaledVector(forward,-ay*2.1*dt);
+      }
+    }
+  }
+  // Held bodies follow the hand directly as kinematic bodies: no competing spring constraint to explode.
+  for(const d of controllerData){
+    if(d.held){
+      const p=new THREE.Vector3();d.grip.getWorldPosition(p);
+      const f=new THREE.Vector3(0,0,-.18).applyQuaternion(d.grip.getWorldQuaternion(new THREE.Quaternion()));p.add(f);
+      d.held.body.position.set(p.x,p.y,p.z);d.held.body.quaternion.set(d.grip.getWorldQuaternion(new THREE.Quaternion()).x,d.grip.getWorldQuaternion(new THREE.Quaternion()).y,d.grip.getWorldQuaternion(new THREE.Quaternion()).z,d.grip.getWorldQuaternion(new THREE.Quaternion()).w);
+      d.held.body.velocity.set(0,0,0);d.held.body.angularVelocity.set(0,0,0);
+      d.lastHandPos = p.clone(); d.lastHandTime=performance.now();
+    }
+  }
+  world.step(1/60,dt,4);
+  for(const o of objects){
+    o.mesh.position.set(o.body.position.x,o.body.position.y,o.body.position.z);
+    o.mesh.quaternion.set(o.body.quaternion.x,o.body.quaternion.y,o.body.quaternion.z,o.body.quaternion.w);
+  }
+  renderer.render(scene,camera);
+}
+renderer.setAnimationLoop(animate);
+document.querySelector('#vrBtn').onclick=async()=>{
+  try{
+    document.querySelector('#menu').style.display='none';
+    if(!navigator.xr){say('WebXR is unavailable in this browser. Open this page in Meta Quest Browser over HTTPS.');return;}
+    const supported=await navigator.xr.isSessionSupported('immersive-vr');
+    if(!supported){say('Immersive VR is not available here. Use Meta Quest Browser on a secure HTTPS page.');return;}
+    const session=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor','hand-tracking']});
+    await renderer.xr.setSession(session);
+    say('VR connected. Aim a controller at objects or the floating spawn panel.');
+  }catch(e){say('Could not enter VR: '+e.message);}
+};
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+document.querySelector('#startBtn').onclick=()=>{document.querySelector('#menu').style.display='none';say('Welcome to Cheetbox. Use the left stick to move; aim + trigger to grab.');};
+document.querySelector('#settingsBtn').onclick=()=>{const p=document.querySelector('#settingsPanel');p.style.display=p.style.display==='block'?'none':'block';};
+document.querySelector('#backBtn').onclick=()=>{document.querySelector('#settingsPanel').style.display='none';};
+say('Cheetbox ready. Press START to enter the sandbox.');
+</script>
+</body>
+</html>
